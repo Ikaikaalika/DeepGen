@@ -1,21 +1,49 @@
 # DeepGen
 
-DeepGen is a cloud-first genealogy research agent designed to find missing ancestors from a master GEDCOM and propose source-backed updates.
+DeepGen is a cloud-first genealogy research bot scaffold focused on finding missing ancestors from a master GEDCOM and producing source-backed updates.
 
-## Scope
-- Support both GEDCOM 5.5.1 and GEDCOM 7.0.
-- Ingest a master GEDCOM, detect ancestor gaps, and generate research tasks.
-- Search approved genealogy sources, collect records, download documents, OCR them, and extract evidence.
-- Propose and apply GEDCOM updates with citation/provenance tracking.
-- Exclude living people by default and require explicit per-person consent before LLM research.
+## What this scaffold includes
+- GEDCOM ingest and export for `5.5.1` and `7.0`.
+- Missing-ancestor gap detection from parsed family links.
+- Living-person safety controls:
+  - Living people are blocked by default.
+  - Per-person consent for `allow data use` and `allow LLM research`.
+  - `Mark All` bulk consent action.
+- Provider configuration endpoints and UI fields for API keys.
+- Research pipeline skeleton with source connectors and LLM backend abstraction.
+- LLM backend options:
+  - OpenAI (API key + model).
+  - Local MLX (`mlx-lm`) for on-device inference on Apple Silicon.
 
-## Living Person Safety Workflow
-- Detect likely living people in uploaded GEDCOM files.
-- Present a review list where users decide, per person:
-  - Can this person’s data be used by the app?
-  - Can the LLM research this person?
-- If either is denied, block LLM processing for that person.
-- Include a "Mark All" control to apply bulk consent decisions.
+## Recommended source APIs to start
+- FamilySearch Developer Platform (primary genealogy API path).
+- NARA Catalog API (US archival records).
+- Library of Congress APIs (public historical collections).
 
-## Status
-Initial project scaffold and repository setup.
+## Quick start
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+uvicorn deepgen.main:app --reload
+```
+
+Open `http://127.0.0.1:8000`.
+
+## Use local MLX LLM
+```bash
+pip install -e .[mlx]
+```
+
+Then in the UI:
+- Set `LLM Backend` to `mlx`.
+- Set `MLX Model` (example: `mlx-community/Llama-3.2-3B-Instruct-4bit`).
+
+## Configure keys
+Use the UI form in section `Provider Config` to set:
+- OpenAI API key/model
+- FamilySearch client credentials
+- NARA API key
+- LLM backend (`openai`, `mlx`, or `none`)
+
+Keys are stored in local SQLite for this scaffold environment.
