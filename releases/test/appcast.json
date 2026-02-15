@@ -1,0 +1,8 @@
+{
+  "channel": "test",
+  "latest": {
+    "version": "0.1.0",
+    "download_url": "https://github.com/tylergee/DeepGen/releases/download/v0.1.0/DeepGen.dmg",
+    "notes": "Initial internal test channel feed."
+  }
+}

@@ -1,0 +1,148 @@
+Metadata-Version: 2.4
+Name: deepgen
+Version: 0.1.0
+Summary: Cloud-first genealogy research agent scaffold.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: anthropic>=0.39.0
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: jinja2>=3.1.4
+Requires-Dist: openai>=1.40.0
+Requires-Dist: pydantic>=2.7.0
+Requires-Dist: pydantic-settings>=2.2.1
+Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: sqlalchemy>=2.0.30
+Requires-Dist: uvicorn[standard]>=0.30.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.2.0; extra == "dev"
+Requires-Dist: pytest-cov>=5.0.0; extra == "dev"
+Requires-Dist: ruff>=0.5.0; extra == "dev"
+Provides-Extra: ocr
+Requires-Dist: pillow>=10.0.0; extra == "ocr"
+Requires-Dist: pytesseract>=0.3.10; extra == "ocr"
+Provides-Extra: mlx
+Requires-Dist: mlx-lm>=0.16.0; extra == "mlx"
+Provides-Extra: vision
+Requires-Dist: face-recognition>=1.3.0; extra == "vision"
+Requires-Dist: pillow>=10.0.0; extra == "vision"
+Provides-Extra: macapp
+Requires-Dist: pywebview>=5.1; extra == "macapp"
+
+# DeepGen
+
+DeepGen is a local-first genealogy research app scaffold focused on finding missing ancestors from a master GEDCOM and producing source-backed updates.
+
+## What this scaffold includes
+- GEDCOM ingest and export for `5.5.1` and `7.0`.
+- Missing-ancestor gap detection from parsed family links.
+- Living-person safety controls:
+  - Living people are blocked by default.
+  - Per-person consent for `allow data use` and `allow LLM research`.
+  - `Mark All` bulk consent action.
+- Provider configuration endpoints and UI fields for API keys.
+- Deep research pipeline with evidence aggregation from internet and local folders.
+- Local folder indexing so users can connect their own archive directory on macOS.
+- Facial recognition pairing endpoint (optional install) for matching unlabeled photos to known people.
+- LLM backend options:
+  - OpenAI (API key + model).
+  - Anthropic Claude (API key + model).
+  - Local MLX (`mlx-lm`) for on-device inference on Apple Silicon.
+
+## Current source connectors
+- FamilySearch search URLs (OAuth API flow left as an extension point).
+- NARA Catalog API (live fetch + parsed candidates).
+- Library of Congress API (live fetch + parsed candidates).
+- Local folder connector (filename/content hints + citations).
+
+## Quick start
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .[dev]
+uvicorn deepgen.main:app --reload
+```
+
+Open `http://127.0.0.1:8000`.
+
+## Run as a mac desktop app
+```bash
+pip install -e .[macapp]
+deepgen-mac
+```
+
+This launches FastAPI locally and opens a native desktop window via `pywebview`.
+
+## Sprint 1 release pipeline (macOS)
+- Build app + dmg: `bash scripts/release/build_macos_app.sh`
+- Notarize dmg: `bash scripts/release/notarize_macos.sh dist/DeepGen.dmg`
+- Smoke-test artifact: `bash scripts/release/smoke_test_macos_artifact.sh`
+- Generate update feed: `python3 scripts/release/generate_update_feed.py --version 0.1.0-beta.1 --download-url <url>`
+
+CI workflow:
+- `/.github/workflows/macos-release.yml`
+- Supports manual dispatch and tag-based release (`v*` tags).
+- Uses optional secrets for signing/notarization:
+  - `MACOS_CODESIGN_IDENTITY`
+  - `APPLE_ID`
+  - `APPLE_TEAM_ID`
+  - `APPLE_APP_PASSWORD`
+
+Update checks:
+- Set `DEEPGEN_UPDATE_FEED_URL` (for example to `releases/test/appcast.json` hosted URL).
+- Use UI buttons `Refresh App Status` and `Check Updates`.
+
+## Deep research workflow
+1. Configure provider keys and set a local folder path in `Provider Config`.
+2. Upload GEDCOM and review living-person consent.
+3. Run `Load Missing Ancestor Gaps`.
+4. Run `Index Local Folder` to validate your archive connection.
+5. Run `Run Research` to produce summary, evidence citations, and parent proposals.
+6. Optionally run `Run Face Pairing` for unlabeled image matching.
+
+## Use local MLX LLM
+```bash
+pip install -e .[mlx]
+```
+
+Then in the UI:
+- Set `LLM Backend` to `mlx`.
+- Set `MLX Model` (example: `mlx-community/Llama-3.2-3B-Instruct-4bit`).
+
+## Use Anthropic Claude
+Then in the UI:
+- Set `LLM Backend` to `anthropic`.
+- Set `Anthropic API Key`.
+- Set `Anthropic Model` (example: `claude-3-5-sonnet-latest`).
+
+## Enable facial recognition pairing
+```bash
+pip install -e .[vision]
+```
+
+Then:
+- Provide a local folder path with photos.
+- Name a subset of images with person names to establish references (for example: `john_doe_1940.jpg`).
+- Run `Run Face Pairing`.
+
+## Configure keys
+Use the UI form in section `Provider Config` to set:
+- OpenAI API key/model
+- Anthropic API key/model
+- FamilySearch client credentials
+- NARA API key
+- Local folder path + enabled toggle
+- Face threshold
+- LLM backend (`openai`, `anthropic`, `mlx`, or `none`)
+
+Secret fields (API keys/secrets/tokens/passwords) are stored in macOS Keychain when available.
+Non-secret provider settings are stored in local SQLite.
+
+Keychain backend controls:
+- `DEEPGEN_KEYCHAIN_BACKEND=auto` (default): use macOS Keychain on macOS, otherwise fallback to local config.
+- `DEEPGEN_KEYCHAIN_BACKEND=security`: force macOS Keychain backend.
+- `DEEPGEN_KEYCHAIN_BACKEND=disabled`: disable Keychain backend.
+
+Key update behavior:
+- Leaving a secret field blank in the UI preserves the existing stored secret.
+- To clear a secret via API, send `__DELETE__` for that field.

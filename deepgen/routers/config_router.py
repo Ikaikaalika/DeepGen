@@ -5,7 +5,6 @@ from deepgen.db import get_db
 from deepgen.schemas import ProviderConfigUpdate, ProviderConfigView
 from deepgen.services.provider_config import (
     SUPPORTED_PROVIDERS,
-    get_provider_config,
     list_provider_configs_masked,
     update_provider_config,
 )
@@ -24,14 +23,8 @@ def get_config(provider: str, db: Session = Depends(get_db)) -> ProviderConfigVi
     provider = provider.lower()
     if provider not in SUPPORTED_PROVIDERS:
         raise HTTPException(status_code=404, detail="Unsupported provider")
-    values = get_provider_config(db, provider)
-    masked = {}
-    for key, value in values.items():
-        if any(marker in key.lower() for marker in ("key", "secret", "token", "password")) and value:
-            masked[key] = f"{'*' * max(len(value) - 4, 0)}{value[-4:]}"
-        else:
-            masked[key] = value
-    return ProviderConfigView(provider=provider, values=masked)
+    masked_configs = list_provider_configs_masked(db)
+    return ProviderConfigView(provider=provider, values=masked_configs.get(provider, {}))
 
 
 @router.put("/config/{provider}", response_model=ProviderConfigView)
@@ -43,11 +36,6 @@ def put_config(
     provider = provider.lower()
     if provider not in SUPPORTED_PROVIDERS:
         raise HTTPException(status_code=404, detail="Unsupported provider")
-    values = update_provider_config(db, provider, body.values)
-    masked = {}
-    for key, value in values.items():
-        if any(marker in key.lower() for marker in ("key", "secret", "token", "password")) and value:
-            masked[key] = f"{'*' * max(len(value) - 4, 0)}{value[-4:]}"
-        else:
-            masked[key] = value
-    return ProviderConfigView(provider=provider, values=masked)
+    update_provider_config(db, provider, body.values)
+    masked_configs = list_provider_configs_masked(db)
+    return ProviderConfigView(provider=provider, values=masked_configs.get(provider, {}))

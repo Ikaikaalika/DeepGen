@@ -11,6 +11,11 @@
       <section class="card">
         <h1>DeepGen</h1>
         <p>Upload GEDCOM, review living profiles, configure keys, and run missing-ancestor research.</p>
+        <div class="row">
+          <button id="refresh-app-status">Refresh App Status</button>
+          <button id="check-updates">Check Updates</button>
+        </div>
+        <pre id="app-status-output"></pre>
       </section>
 
       <section class="card">
@@ -19,6 +24,7 @@
           <label>LLM Backend
             <select id="llm-backend">
               <option value="openai">openai</option>
+              <option value="anthropic">anthropic</option>
               <option value="mlx">mlx</option>
               <option value="none">none</option>
             </select>
@@ -28,6 +34,12 @@
           </label>
           <label>OpenAI Model
             <input id="openai-model" type="text" placeholder="gpt-4.1-mini" />
+          </label>
+          <label>Anthropic API Key
+            <input id="anthropic-api-key" type="password" placeholder="sk-ant-..." />
+          </label>
+          <label>Anthropic Model
+            <input id="anthropic-model" type="text" placeholder="claude-3-5-sonnet-latest" />
           </label>
           <label>MLX Model
             <input id="mlx-model" type="text" placeholder="mlx-community/Llama-3.2-3B-Instruct-4bit" />
@@ -40,6 +52,18 @@
           </label>
           <label>NARA API Key
             <input id="nara-api-key" type="password" />
+          </label>
+          <label>Local Research Folder (mac path)
+            <input id="local-folder-path" type="text" placeholder="/Users/you/Documents/GenealogyVault" />
+          </label>
+          <label>Enable Local Folder Connector
+            <select id="local-enabled">
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>Face Match Threshold (0-1)
+            <input id="face-threshold" type="text" placeholder="0.52" />
           </label>
         </div>
         <button id="save-config">Save Config</button>
@@ -76,15 +100,54 @@
       </section>
 
       <section class="card">
-        <h2>4. Gap Detection + Research</h2>
-        <button id="load-gaps">Load Missing Ancestor Gaps</button>
-        <ul id="gap-list"></ul>
-        <button id="run-research">Run Research</button>
-        <pre id="research-output"></pre>
+        <h2>4. Family Tree</h2>
+        <p class="hint">Pick a root person, then pan (drag) and zoom (scroll) the tree. Click a person to re-root.</p>
+        <div class="row">
+          <label>Root
+            <input id="tree-root" type="text" placeholder="Search name or @I123@ ..." autocomplete="off" />
+          </label>
+          <label>Mode
+            <select id="tree-mode">
+              <option value="ancestors">ancestors</option>
+              <option value="descendants">descendants</option>
+            </select>
+          </label>
+          <label>Generations
+            <select id="tree-depth">
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4" selected>4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+            </select>
+          </label>
+          <button id="tree-render">Render</button>
+          <button id="tree-center" type="button">Center</button>
+        </div>
+        <div id="tree-suggestions" class="suggestions" hidden></div>
+        <div class="tree-wrap">
+          <svg id="tree-svg" class="tree-svg" role="img" aria-label="Family tree"></svg>
+        </div>
+        <p id="tree-status" class="status"></p>
       </section>
 
       <section class="card">
-        <h2>5. Export GEDCOM</h2>
+        <h2>5. Gap Detection + Research v2</h2>
+        <button id="load-gaps">Load Missing Ancestor Gaps</button>
+        <button id="index-local">Index Local Folder</button>
+        <button id="run-face-pair">Run Face Pairing</button>
+        <ul id="gap-list"></ul>
+        <div class="row">
+          <button id="run-research">Run Research Job</button>
+          <button id="apply-approved">Apply Approved Proposals</button>
+        </div>
+        <pre id="research-job-status"></pre>
+        <pre id="research-output"></pre>
+        <div id="proposal-review"></div>
+      </section>
+
+      <section class="card">
+        <h2>6. Export GEDCOM</h2>
         <label>Version
           <select id="export-version">
             <option value="7.0">7.0</option>

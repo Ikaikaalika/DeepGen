@@ -1,119 +1,276 @@
-from fastapi import APIRouter, Depends, HTTPException
+from __future__ import annotations
+
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
+from deepgen.config import get_settings
 from deepgen.db import get_db
-from deepgen.models import Person, UploadSession
-from deepgen.schemas import ApplyProposalRequest, ResearchRequest, ResearchResponse
-from deepgen.services.connectors import build_connectors
-from deepgen.services.llm import LLMConfig, build_llm_client
+from deepgen.models import ParentProposal, Person, ResearchJob, UploadSession
+from deepgen.schemas import (
+    ApplyApprovedRequest,
+    ApplyApprovedResponse,
+    FacePairMatch,
+    FacePairRequest,
+    FacePairResponse,
+    LocalFolderIndexRequest,
+    LocalFolderIndexResponse,
+    ProposalDecisionRequest,
+    ProposalDecisionResponse,
+    ResearchFindingsResponse,
+    ResearchJobCreateRequest,
+    ResearchJobCreateResponse,
+    ResearchJobStatusResponse,
+    ResearchProposalView,
+    ResearchProposalsResponse,
+)
+from deepgen.services.faces import FacePairingError, pair_faces_to_people
+from deepgen.services.local_files import LocalFolderError, index_local_folder
 from deepgen.services.provider_config import list_provider_configs
-from deepgen.services.research import run_research
+from deepgen.services.research_pipeline.apply import apply_approved_proposals
+from deepgen.services.research_pipeline.jobs import (
+    create_research_job,
+    decide_proposal,
+    job_status_payload,
+    list_job_findings,
+    list_job_proposals,
+    run_research_job,
+)
 
-router = APIRouter(prefix="/api/sessions", tags=["research"])
-
-
-def _next_xref(db: Session, session_id: str) -> str:
-    stmt: Select[tuple[Person]] = select(Person).where(Person.session_id == session_id)
-    max_num = 0
-    for person in db.scalars(stmt).all():
-        xref = person.xref.strip()
-        if xref.startswith("@I") and xref.endswith("@"):
-            raw = xref[2:-1]
-            if raw.isdigit():
-                max_num = max(max_num, int(raw))
-    return f"@I{max_num + 1}@"
+router = APIRouter(tags=["research"])
+sessions_router = APIRouter(prefix="/api/sessions", tags=["research"])
+jobs_router = APIRouter(prefix="/api/research", tags=["research"])
 
 
-@router.post("/{session_id}/research/run", response_model=ResearchResponse)
-def run_session_research(
+def _assert_v2_enabled() -> None:
+    if not get_settings().research_v2_enabled:
+        raise HTTPException(status_code=404, detail="Research v2 endpoints are disabled")
+
+
+def _proposal_json_to_view(row: ParentProposal) -> ResearchProposalView:
+    def load_list(raw: str) -> list:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        return payload if isinstance(payload, list) else []
+
+    def load_dict(raw: str) -> dict:
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    return ResearchProposalView(
+        proposal_id=row.id,
+        job_id=row.job_id,
+        session_id=row.session_id,
+        person_xref=row.person_xref,
+        relationship=row.relationship,
+        candidate_name=row.candidate_name,
+        confidence=row.confidence,
+        status=row.status,
+        notes=row.notes,
+        evidence_ids=load_list(row.evidence_ids_json),
+        contradiction_flags=load_list(row.contradiction_flags_json),
+        score_components=load_dict(row.score_components_json),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+@sessions_router.post("/{session_id}/research/jobs", response_model=ResearchJobCreateResponse)
+def create_session_research_job(
     session_id: str,
-    body: ResearchRequest,
+    body: ResearchJobCreateRequest,
     db: Session = Depends(get_db),
-) -> ResearchResponse:
+) -> ResearchJobCreateResponse:
+    _assert_v2_enabled()
+
+    session = db.get(UploadSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    max_people = max(1, min(body.max_people, 200))
+    job = create_research_job(
+        db=db,
+        session_id=session_id,
+        people_xrefs=body.person_xrefs,
+        max_people=max_people,
+        connector_overrides=body.connector_overrides,
+        prompt_template_version=get_settings().research_prompt_template_version,
+    )
+
+    # Execute in-process for deterministic local behavior.
+    run_research_job(db, job.id)
+
+    return ResearchJobCreateResponse(
+        job_id=job.id,
+        status="queued",
+        created_at=job.created_at,
+    )
+
+
+@jobs_router.get("/jobs/{job_id}", response_model=ResearchJobStatusResponse)
+def get_research_job_status(
+    job_id: str,
+    db: Session = Depends(get_db),
+) -> ResearchJobStatusResponse:
+    _assert_v2_enabled()
+
+    job = db.get(ResearchJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Research job not found")
+
+    return ResearchJobStatusResponse(**job_status_payload(job))
+
+
+@jobs_router.get("/jobs/{job_id}/findings", response_model=ResearchFindingsResponse)
+def get_research_job_findings(
+    job_id: str,
+    db: Session = Depends(get_db),
+) -> ResearchFindingsResponse:
+    _assert_v2_enabled()
+
+    try:
+        findings = list_job_findings(db, job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ResearchFindingsResponse(job_id=job_id, findings=findings)
+
+
+@jobs_router.get("/jobs/{job_id}/proposals", response_model=ResearchProposalsResponse)
+def get_research_job_proposals(
+    job_id: str,
+    limit: int = Query(default=100, ge=1, le=250),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+) -> ResearchProposalsResponse:
+    _assert_v2_enabled()
+
+    try:
+        proposals, total = list_job_proposals(db, job_id, limit=limit, offset=offset)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return ResearchProposalsResponse(
+        job_id=job_id,
+        total=total,
+        limit=limit,
+        offset=offset,
+        proposals=proposals,
+    )
+
+
+@jobs_router.post("/proposals/{proposal_id}/decision", response_model=ProposalDecisionResponse)
+def decide_research_proposal(
+    proposal_id: int,
+    body: ProposalDecisionRequest,
+    db: Session = Depends(get_db),
+) -> ProposalDecisionResponse:
+    _assert_v2_enabled()
+
+    try:
+        proposal = decide_proposal(db, proposal_id, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ProposalDecisionResponse(proposal=_proposal_json_to_view(proposal))
+
+
+@sessions_router.post("/{session_id}/research/apply-approved", response_model=ApplyApprovedResponse)
+def apply_approved_research_proposals(
+    session_id: str,
+    body: ApplyApprovedRequest,
+    db: Session = Depends(get_db),
+) -> ApplyApprovedResponse:
+    _assert_v2_enabled()
+
+    session = db.get(UploadSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    result = apply_approved_proposals(db, session_id, job_id=body.job_id)
+    return ApplyApprovedResponse(applied_updates=result.applied_updates, skipped=result.skipped)
+
+
+@sessions_router.post("/{session_id}/research/local-index", response_model=LocalFolderIndexResponse)
+def build_local_folder_index(
+    session_id: str,
+    body: LocalFolderIndexRequest,
+    db: Session = Depends(get_db),
+) -> LocalFolderIndexResponse:
     session = db.get(UploadSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
     configs = list_provider_configs(db)
-    llm_cfg = configs.get("llm", {})
-    openai_cfg = configs.get("openai", {})
-    mlx_cfg = configs.get("mlx", {})
+    local_cfg = configs.get("local", {})
+    folder_path = (body.folder_path or local_cfg.get("folder_path", "")).strip()
+    if not folder_path:
+        raise HTTPException(status_code=400, detail="Provide folder_path or set Provider Config > local.folder_path")
 
-    llm_client = build_llm_client(
-        LLMConfig(
-            backend=llm_cfg.get("backend", "openai"),
-            openai_api_key=openai_cfg.get("api_key", ""),
-            openai_model=openai_cfg.get("model", "gpt-4.1-mini"),
-            mlx_model=mlx_cfg.get("model", "mlx-community/Llama-3.2-3B-Instruct-4bit"),
-        )
-    )
-    connectors = build_connectors(configs)
-    findings = run_research(
-        db=db,
-        session_id=session_id,
-        people_xrefs=body.person_xrefs,
-        max_people=body.max_people,
-        connectors=connectors,
-        llm_client=llm_client,
-    )
-    return ResearchResponse(
-        llm_backend=llm_cfg.get("backend", "openai"),
-        source_connectors=[connector.name for connector in connectors],
-        findings=findings,
+    try:
+        index = index_local_folder(folder_path=folder_path, max_files=body.max_files)
+    except LocalFolderError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return LocalFolderIndexResponse(
+        folder_path=index.folder_path,
+        file_count=index.file_count,
+        sample_files=index.sample_files,
     )
 
 
-@router.post("/{session_id}/research/apply-proposals")
-def apply_research_proposals(
+@sessions_router.post("/{session_id}/research/face-pair", response_model=FacePairResponse)
+def run_face_pairing(
     session_id: str,
-    body: ApplyProposalRequest,
+    body: FacePairRequest,
     db: Session = Depends(get_db),
-):
+) -> FacePairResponse:
     session = db.get(UploadSession, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    applied = 0
-    for update in body.updates:
-        stmt: Select[tuple[Person]] = select(Person).where(
-            Person.session_id == session_id, Person.xref == update.child_xref
+    configs = list_provider_configs(db)
+    local_cfg = configs.get("local", {})
+    folder_path = (body.folder_path or local_cfg.get("folder_path", "")).strip()
+    if not folder_path:
+        raise HTTPException(status_code=400, detail="Provide folder_path or set Provider Config > local.folder_path")
+
+    stmt: Select[tuple[Person]] = select(Person).where(Person.session_id == session_id).order_by(Person.id)
+    people = [person for person in db.scalars(stmt).all() if not (person.is_living and not person.can_use_data)]
+
+    try:
+        report = pair_faces_to_people(
+            folder_path=folder_path,
+            people=people,
+            max_images=body.max_images,
+            threshold=body.threshold,
         )
-        child = db.scalars(stmt).first()
-        if not child:
-            continue
+    except FacePairingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        if update.father_name and not child.father_xref:
-            xref = _next_xref(db, session_id)
-            father = Person(
-                session_id=session_id,
-                xref=xref,
-                name=update.father_name,
-                sex="M",
-                is_living=False,
-                can_use_data=True,
-                can_llm_research=True,
+    return FacePairResponse(
+        engine=report.engine,
+        scanned_images=report.scanned_images,
+        reference_faces=report.reference_faces,
+        skipped_images=report.skipped_images,
+        pairs=[
+            FacePairMatch(
+                image_path=item.image_path,
+                person_xref=item.person_xref,
+                person_name=item.person_name,
+                confidence=item.confidence,
+                distance=item.distance,
             )
-            db.add(father)
-            db.flush()
-            child.father_xref = father.xref
-            applied += 1
+            for item in report.pairs
+        ],
+    )
 
-        if update.mother_name and not child.mother_xref:
-            xref = _next_xref(db, session_id)
-            mother = Person(
-                session_id=session_id,
-                xref=xref,
-                name=update.mother_name,
-                sex="F",
-                is_living=False,
-                can_use_data=True,
-                can_llm_research=True,
-            )
-            db.add(mother)
-            db.flush()
-            child.mother_xref = mother.xref
-            applied += 1
 
-    db.commit()
-    return {"applied_updates": applied}
+router.include_router(sessions_router)
+router.include_router(jobs_router)

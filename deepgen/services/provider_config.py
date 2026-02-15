@@ -1,13 +1,16 @@
 import json
+import re
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
 from deepgen.config import get_settings
 from deepgen.models import ProviderConfig
+from deepgen.services import keychain
 
 SECRET_FIELD_MARKERS = ("key", "secret", "token", "password")
-SUPPORTED_PROVIDERS = ("openai", "familysearch", "nara", "loc", "llm", "mlx", "ocr")
+SUPPORTED_PROVIDERS = ("openai", "anthropic", "familysearch", "nara", "loc", "llm", "mlx", "ocr", "local", "face")
+_CLEAR_SENTINEL = "__DELETE__"
 
 
 def _default_configs() -> dict[str, dict[str, str]]:
@@ -16,6 +19,10 @@ def _default_configs() -> dict[str, dict[str, str]]:
         "openai": {
             "api_key": settings.openai_api_key or "",
             "model": settings.openai_model,
+        },
+        "anthropic": {
+            "api_key": settings.anthropic_api_key or "",
+            "model": settings.anthropic_model,
         },
         "llm": {
             "backend": settings.llm_backend,
@@ -37,6 +44,14 @@ def _default_configs() -> dict[str, dict[str, str]]:
         "ocr": {
             "provider": "tesseract",
         },
+        "local": {
+            "folder_path": "",
+            "enabled": "false",
+        },
+        "face": {
+            "enabled": "false",
+            "threshold": "0.52",
+        },
     }
 
 
@@ -51,22 +66,92 @@ def _mask_value(value: str) -> str:
     return f"{'*' * (len(value) - 4)}{value[-4:]}"
 
 
-def get_provider_config(db: Session, provider: str) -> dict[str, str]:
-    provider = provider.lower()
-    defaults = _default_configs().get(provider, {})
-    row = db.get(ProviderConfig, provider)
+def _looks_masked(value: str) -> bool:
+    return bool(re.fullmatch(r"\*{4,}[A-Za-z0-9]{0,4}", value))
+
+
+def _load_row_data(row: ProviderConfig | None) -> dict[str, str]:
     if not row:
-        return defaults
+        return {}
     try:
         data = json.loads(row.config_json)
     except json.JSONDecodeError:
         data = {}
-    merged = {**defaults, **{k: str(v) for k, v in data.items()}}
-    return merged
+    return {k: str(v) for k, v in data.items()}
+
+
+def _save_row_data(db: Session, provider: str, data: dict[str, str]) -> None:
+    row = db.get(ProviderConfig, provider)
+    if row is None:
+        row = ProviderConfig(
+            provider=provider,
+            config_json=json.dumps(data),
+            updated_at=datetime.now(UTC),
+        )
+        db.add(row)
+    else:
+        row.config_json = json.dumps(data)
+        row.updated_at = datetime.now(UTC)
+
+
+def get_provider_config(db: Session, provider: str) -> dict[str, str]:
+    provider = provider.lower()
+    defaults = _default_configs().get(provider, {})
+    row = db.get(ProviderConfig, provider)
+    row_data = _load_row_data(row)
+    result: dict[str, str] = {}
+
+    keys = set(defaults) | set(row_data)
+    migrated = False
+
+    for key in keys:
+        default_value = str(defaults.get(key, ""))
+        row_has_key = key in row_data
+        row_value = str(row_data.get(key, ""))
+
+        if not _is_secret(key):
+            result[key] = row_value if key in row_data else default_value
+            continue
+
+        secret_value = keychain.get_secret(provider, key)
+        if secret_value:
+            result[key] = secret_value
+            if row_value:
+                row_data.pop(key, None)
+                migrated = True
+            continue
+
+        if row_value:
+            if keychain.set_secret(provider, key, row_value):
+                result[key] = row_value
+                row_data.pop(key, None)
+                migrated = True
+            else:
+                result[key] = row_value
+            continue
+
+        if row_has_key:
+            result[key] = row_value
+        else:
+            result[key] = default_value
+
+    if migrated:
+        _save_row_data(db, provider, row_data)
+        db.commit()
+
+    return result
 
 
 def list_provider_configs(db: Session) -> dict[str, dict[str, str]]:
     return {provider: get_provider_config(db, provider) for provider in SUPPORTED_PROVIDERS}
+
+
+def keychain_status() -> dict[str, str | bool]:
+    backend = keychain.backend_name()
+    return {
+        "backend": backend,
+        "available": keychain.is_available(),
+    }
 
 
 def list_provider_configs_masked(db: Session) -> dict[str, dict[str, str]]:
@@ -84,18 +169,31 @@ def list_provider_configs_masked(db: Session) -> dict[str, dict[str, str]]:
 def update_provider_config(db: Session, provider: str, values: dict[str, str]) -> dict[str, str]:
     provider = provider.lower()
     row = db.get(ProviderConfig, provider)
-    current = get_provider_config(db, provider)
+    row_data = _load_row_data(row)
+    defaults = _default_configs().get(provider, {})
+
     for key, value in values.items():
-        current[key] = value
-    if row is None:
-        row = ProviderConfig(
-            provider=provider,
-            config_json=json.dumps(current),
-            updated_at=datetime.now(UTC),
-        )
-        db.add(row)
-    else:
-        row.config_json = json.dumps(current)
-        row.updated_at = datetime.now(UTC)
+        value = str(value)
+        if _is_secret(key):
+            if value == _CLEAR_SENTINEL:
+                keychain.delete_secret(provider, key)
+                row_data[key] = ""
+                continue
+            if not value or _looks_masked(value):
+                continue
+            if keychain.set_secret(provider, key, value):
+                row_data.pop(key, None)
+            else:
+                row_data[key] = value
+            continue
+        row_data[key] = value
+
+    # Keep non-secret defaults available, but do not persist secret defaults into SQLite.
+    for key, default_value in defaults.items():
+        if _is_secret(key):
+            continue
+        row_data.setdefault(key, default_value)
+
+    _save_row_data(db, provider, row_data)
     db.commit()
     return get_provider_config(db, provider)

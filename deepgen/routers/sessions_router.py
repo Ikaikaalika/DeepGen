@@ -11,6 +11,7 @@ from deepgen.models import Person, UploadSession
 from deepgen.schemas import (
     LivingConsentRequest,
     LivingPersonView,
+    PersonView,
     UploadSummary,
 )
 from deepgen.services.gedcom import export_gedcom, parse_gedcom_text
@@ -176,3 +177,29 @@ def export_session_gedcom(
         for person in people
     ]
     return export_gedcom(version=version, people=payload)
+
+
+@router.get("/{session_id}/people", response_model=list[PersonView])
+def session_people(session_id: str, db: Session = Depends(get_db)) -> list[PersonView]:
+    session = db.get(UploadSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    stmt: Select[tuple[Person]] = select(Person).where(Person.session_id == session_id).order_by(Person.id)
+    people = db.scalars(stmt).all()
+    return [
+        PersonView(
+            id=person.id,
+            xref=person.xref,
+            name=person.name,
+            sex=person.sex,
+            birth_date=person.birth_date,
+            death_date=person.death_date,
+            birth_year=person.birth_year,
+            is_living=person.is_living,
+            can_use_data=person.can_use_data,
+            can_llm_research=person.can_llm_research,
+            father_xref=person.father_xref,
+            mother_xref=person.mother_xref,
+        )
+        for person in people
+    ]

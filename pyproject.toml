@@ -9,6 +9,8 @@ description = "Cloud-first genealogy research agent scaffold."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "alembic>=1.13.2",
+  "anthropic>=0.39.0",
   "fastapi>=0.115.0",
   "httpx>=0.27.0",
   "jinja2>=3.1.4",
@@ -19,6 +21,9 @@ dependencies = [
   "sqlalchemy>=2.0.30",
   "uvicorn[standard]>=0.30.0",
 ]
+
+[project.scripts]
+deepgen-mac = "deepgen.mac_app:main"
 
 [project.optional-dependencies]
 dev = [
@@ -33,6 +38,13 @@ ocr = [
 mlx = [
   "mlx-lm>=0.16.0",
 ]
+vision = [
+  "face-recognition>=1.3.0",
+  "pillow>=10.0.0",
+]
+macapp = [
+  "pywebview>=5.1",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -40,4 +52,4 @@ addopts = "-q"
 pythonpath = ["."]
 
 [tool.setuptools]
-packages = ["deepgen", "deepgen.routers", "deepgen.services"]
+packages = ["deepgen", "deepgen.routers", "deepgen.services", "deepgen.services.research_pipeline"]
