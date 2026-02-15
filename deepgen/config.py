@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     enable_mlx: bool = False
     research_v2_enabled: bool = True
     research_prompt_template_version: str = "v2"
+    familysearch_access_token: str | None = None
+    nara_api_key: str | None = None
+    loc_api_key: str | None = None
+    census_api_key: str | None = None
+    geonames_username: str | None = None
+    europeana_api_key: str | None = None
+    openrefine_service_url: str | None = None
+    gnis_dataset_path: str | None = None
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

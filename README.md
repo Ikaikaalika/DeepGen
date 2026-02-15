@@ -19,9 +19,15 @@ DeepGen is a local-first genealogy research app scaffold focused on finding miss
   - Local MLX (`mlx-lm`) for on-device inference on Apple Silicon.
 
 ## Current source connectors
-- FamilySearch search URLs (OAuth API flow left as an extension point).
+- FamilySearch web search + optional direct API search (`access_token`).
 - NARA Catalog API (live fetch + parsed candidates).
 - Library of Congress API (live fetch + parsed candidates).
+- Census surname API connector.
+- GNIS dataset connector (local downloaded dataset path).
+- GeoNames API connector.
+- Wikidata entity search connector.
+- Europeana API connector.
+- OpenRefine reconciliation connector.
 - Local folder connector (filename/content hints + citations).
 
 ## Quick start
@@ -65,13 +71,15 @@ Update checks:
 ## Deep research workflow
 1. Configure provider keys and set a local folder path in `Provider Config`.
 2. Upload GEDCOM and review living-person consent.
-3. Run `Load Missing Ancestor Gaps`.
-4. Run `Index Local Folder` to validate your archive connection.
-5. Run `Run Research Job` to execute the staged v2 pipeline:
+3. Upload user documents in section `User File Uploads + Index` (optional but recommended).
+4. Run `Load Missing Ancestor Gaps`.
+5. Run `Index Local Folder` to validate your archive connection.
+6. Run `Run Research Job` to execute the staged v2 pipeline:
    - retrieval -> extraction -> contradiction checks -> proposal synthesis.
-6. Review proposals in `pending_review` and approve/reject/edit manually.
-7. Run `Apply Approved Proposals` to update parent links with audit events.
-8. Optionally run `Run Face Pairing` for unlabeled image matching.
+   - includes evidence from indexed user-uploaded files automatically.
+7. Review proposals in `pending_review` and approve/reject/edit manually.
+8. Run `Apply Approved Proposals` to update parent links with audit events.
+9. Optionally run `Run Face Pairing` for unlabeled image matching.
 
 ## Research v2 API
 - `POST /api/sessions/{session_id}/research/jobs`
@@ -80,6 +88,12 @@ Update checks:
 - `GET /api/research/jobs/{job_id}/proposals`
 - `POST /api/research/proposals/{proposal_id}/decision`
 - `POST /api/sessions/{session_id}/research/apply-approved`
+
+## User Document Index API
+- `POST /api/sessions/{session_id}/documents/upload` (multipart `file`)
+- `GET /api/sessions/{session_id}/documents`
+- `GET /api/sessions/{session_id}/documents/search?q=<query>`
+- `POST /api/sessions/{session_id}/documents/reindex`
 
 ## Migrations (Alembic)
 ```bash
@@ -115,8 +129,15 @@ Then:
 Use the UI form in section `Provider Config` to set:
 - OpenAI API key/model
 - Anthropic API key/model
-- FamilySearch client credentials
+- FamilySearch client credentials + access token
 - NARA API key
+- LOC API key
+- Census API key + enabled toggle
+- GNIS dataset path + enabled toggle
+- GeoNames username + enabled toggle
+- Wikidata enabled toggle
+- Europeana API key + enabled toggle
+- OpenRefine reconciliation URL + enabled toggle
 - Local folder path + enabled toggle
 - Face threshold
 - LLM backend (`openai`, `anthropic`, `mlx`, or `none`)

@@ -48,6 +48,41 @@ class PersonView(BaseModel):
     mother_xref: str | None = None
 
 
+class IndexedDocumentView(BaseModel):
+    id: int
+    original_filename: str
+    stored_path: str
+    mime_type: str
+    size_bytes: int
+    source: str
+    text_snippet: str
+    created_at: datetime
+    indexed_at: datetime
+
+
+class DocumentUploadResponse(BaseModel):
+    document: IndexedDocumentView
+
+
+class DocumentListResponse(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    documents: list[IndexedDocumentView] = Field(default_factory=list)
+
+
+class DocumentSearchResponse(BaseModel):
+    query: str
+    total: int
+    documents: list[IndexedDocumentView] = Field(default_factory=list)
+
+
+class DocumentReindexResponse(BaseModel):
+    total: int
+    indexed: int
+    skipped: int
+
+
 class PersonConsentUpdate(BaseModel):
     person_id: int
     can_use_data: bool

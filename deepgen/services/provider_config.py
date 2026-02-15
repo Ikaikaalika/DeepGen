@@ -9,7 +9,24 @@ from deepgen.models import ProviderConfig
 from deepgen.services import keychain
 
 SECRET_FIELD_MARKERS = ("key", "secret", "token", "password")
-SUPPORTED_PROVIDERS = ("openai", "anthropic", "familysearch", "nara", "loc", "llm", "mlx", "ocr", "local", "face")
+SUPPORTED_PROVIDERS = (
+    "openai",
+    "anthropic",
+    "familysearch",
+    "nara",
+    "loc",
+    "census",
+    "gnis",
+    "geonames",
+    "wikidata",
+    "europeana",
+    "openrefine",
+    "llm",
+    "mlx",
+    "ocr",
+    "local",
+    "face",
+)
 _CLEAR_SENTINEL = "__DELETE__"
 
 
@@ -34,12 +51,36 @@ def _default_configs() -> dict[str, dict[str, str]]:
         "familysearch": {
             "client_id": "",
             "client_secret": "",
+            "access_token": settings.familysearch_access_token or "",
         },
         "nara": {
-            "api_key": "",
+            "api_key": settings.nara_api_key or "",
         },
         "loc": {
-            "api_key": "",
+            "api_key": settings.loc_api_key or "",
+        },
+        "census": {
+            "enabled": "false",
+            "api_key": settings.census_api_key or "",
+        },
+        "gnis": {
+            "enabled": "false",
+            "dataset_path": settings.gnis_dataset_path or "",
+        },
+        "geonames": {
+            "enabled": "false",
+            "username": settings.geonames_username or "",
+        },
+        "wikidata": {
+            "enabled": "true",
+        },
+        "europeana": {
+            "enabled": "false",
+            "api_key": settings.europeana_api_key or "",
+        },
+        "openrefine": {
+            "enabled": "false",
+            "service_url": settings.openrefine_service_url or "",
         },
         "ocr": {
             "provider": "tesseract",

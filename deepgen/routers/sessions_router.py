@@ -1,20 +1,32 @@
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from deepgen.db import get_db
-from deepgen.models import Person, UploadSession
+from deepgen.models import IndexedDocument, Person, UploadSession
 from deepgen.schemas import (
+    DocumentListResponse,
+    DocumentReindexResponse,
+    DocumentSearchResponse,
+    DocumentUploadResponse,
+    IndexedDocumentView,
     LivingConsentRequest,
     LivingPersonView,
     PersonView,
     UploadSummary,
 )
 from deepgen.services.gedcom import export_gedcom, parse_gedcom_text
+from deepgen.services.document_index import (
+    DocumentIndexError,
+    index_uploaded_document,
+    list_indexed_documents,
+    reindex_session_documents,
+    search_indexed_documents,
+)
 from deepgen.services.research import gap_candidates
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -23,6 +35,20 @@ DATA_DIR = Path("data/uploads")
 
 def _ensure_data_dir() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _doc_to_view(row: IndexedDocument) -> IndexedDocumentView:
+    return IndexedDocumentView(
+        id=row.id,
+        original_filename=row.original_filename,
+        stored_path=row.stored_path,
+        mime_type=row.mime_type,
+        size_bytes=row.size_bytes,
+        source=row.source,
+        text_snippet=row.text_snippet,
+        created_at=row.created_at,
+        indexed_at=row.indexed_at,
+    )
 
 
 @router.post("/upload", response_model=UploadSummary)
@@ -203,3 +229,84 @@ def session_people(session_id: str, db: Session = Depends(get_db)) -> list[Perso
         )
         for person in people
     ]
+
+
+@router.post("/{session_id}/documents/upload", response_model=DocumentUploadResponse)
+async def upload_session_document(
+    session_id: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> DocumentUploadResponse:
+    session = db.get(UploadSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    content = await file.read()
+    try:
+        row = index_uploaded_document(
+            db=db,
+            session_id=session_id,
+            filename=file.filename or "upload.bin",
+            content_bytes=content,
+            content_type=file.content_type or "",
+        )
+    except DocumentIndexError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return DocumentUploadResponse(document=_doc_to_view(row))
+
+
+@router.get("/{session_id}/documents", response_model=DocumentListResponse)
+def list_session_documents(
+    session_id: str,
+    limit: int = Query(default=50, ge=1, le=250),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+) -> DocumentListResponse:
+    session = db.get(UploadSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    rows, total = list_indexed_documents(db, session_id=session_id, limit=limit, offset=offset)
+    return DocumentListResponse(
+        total=total,
+        limit=limit,
+        offset=offset,
+        documents=[_doc_to_view(row) for row in rows],
+    )
+
+
+@router.get("/{session_id}/documents/search", response_model=DocumentSearchResponse)
+def search_session_documents(
+    session_id: str,
+    q: str = Query(min_length=1),
+    limit: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> DocumentSearchResponse:
+    session = db.get(UploadSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    rows = search_indexed_documents(db, session_id=session_id, query=q, limit=limit)
+    return DocumentSearchResponse(
+        query=q,
+        total=len(rows),
+        documents=[_doc_to_view(row) for row in rows],
+    )
+
+
+@router.post("/{session_id}/documents/reindex", response_model=DocumentReindexResponse)
+def reindex_documents(
+    session_id: str,
+    db: Session = Depends(get_db),
+) -> DocumentReindexResponse:
+    session = db.get(UploadSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    stats = reindex_session_documents(db, session_id=session_id)
+    return DocumentReindexResponse(
+        total=stats["total"],
+        indexed=stats["indexed"],
+        skipped=stats["skipped"],
+    )

@@ -18,6 +18,7 @@ from deepgen.models import (
 )
 from deepgen.schemas import ProposalDecisionRequest
 from deepgen.services.connectors import SourceConnector, build_connectors
+from deepgen.services.document_index import search_uploaded_documents_for_person
 from deepgen.services.provider_config import list_provider_configs
 from deepgen.services.research_pipeline.backend_adapters import resolve_runtime
 from deepgen.services.research_pipeline.contradictions import evaluate_contradictions
@@ -182,6 +183,13 @@ def run_research_job(db: Session, job_id: str) -> ResearchJob:
                 max_retries=1,
                 max_parallel_connectors=4,
             )
+            uploaded_hits = search_uploaded_documents_for_person(
+                db,
+                session_id=job.session_id,
+                name=person.name,
+                birth_year=person.birth_year,
+                limit=6,
+            )
             _record_stage_duration(stats, "retrieval", perf_counter() - retrieval_start)
             job.retry_count += retrieval.retries_used
             for err in retrieval.errors:
@@ -203,22 +211,41 @@ def run_research_job(db: Session, job_id: str) -> ResearchJob:
                 db.add(fallback)
                 db.flush()
                 evidence_rows.append(fallback)
-            else:
-                for rank, item in enumerate(retrieval.evidence, start=1):
-                    row = EvidenceItem(
-                        job_id=job.id,
-                        person_xref=person.xref,
-                        source=item.source,
-                        title=item.title,
-                        url=item.url,
-                        note=item.note,
-                        normalized_url=item.normalized_url,
-                        normalized_title_hash=item.normalized_title_hash,
-                        retrieval_rank=rank,
-                    )
-                    db.add(row)
-                    db.flush()
-                    evidence_rows.append(row)
+
+            rank = 1
+            for item in retrieval.evidence:
+                row = EvidenceItem(
+                    job_id=job.id,
+                    person_xref=person.xref,
+                    source=item.source,
+                    title=item.title,
+                    url=item.url,
+                    note=item.note,
+                    normalized_url=item.normalized_url,
+                    normalized_title_hash=item.normalized_title_hash,
+                    retrieval_rank=rank,
+                )
+                db.add(row)
+                db.flush()
+                evidence_rows.append(row)
+                rank += 1
+
+            for upload_item in uploaded_hits:
+                row = EvidenceItem(
+                    job_id=job.id,
+                    person_xref=person.xref,
+                    source=upload_item.source,
+                    title=upload_item.title,
+                    url=upload_item.url,
+                    note=upload_item.note,
+                    normalized_url=upload_item.url.strip().lower(),
+                    normalized_title_hash=f"user-upload-{rank}",
+                    retrieval_rank=rank,
+                )
+                db.add(row)
+                db.flush()
+                evidence_rows.append(row)
+                rank += 1
 
             extraction_start = perf_counter()
             job.stage = "extraction"

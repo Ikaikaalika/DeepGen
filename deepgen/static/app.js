@@ -107,6 +107,21 @@ async function loadProviderConfig() {
   document.getElementById("openai-model").value = byProvider.openai?.model || "gpt-4.1-mini";
   document.getElementById("anthropic-model").value = byProvider.anthropic?.model || "claude-3-5-sonnet-latest";
   document.getElementById("mlx-model").value = byProvider.mlx?.model || "mlx-community/Llama-3.2-3B-Instruct-4bit";
+  document.getElementById("family-client-id").value = byProvider.familysearch?.client_id || "";
+  document.getElementById("family-access-token").value = byProvider.familysearch?.access_token || "";
+  document.getElementById("nara-api-key").value = byProvider.nara?.api_key || "";
+  document.getElementById("loc-api-key").value = byProvider.loc?.api_key || "";
+  document.getElementById("census-enabled").value = byProvider.census?.enabled || "false";
+  document.getElementById("census-api-key").value = byProvider.census?.api_key || "";
+  document.getElementById("gnis-enabled").value = byProvider.gnis?.enabled || "false";
+  document.getElementById("gnis-dataset-path").value = byProvider.gnis?.dataset_path || "";
+  document.getElementById("geonames-enabled").value = byProvider.geonames?.enabled || "false";
+  document.getElementById("geonames-username").value = byProvider.geonames?.username || "";
+  document.getElementById("wikidata-enabled").value = byProvider.wikidata?.enabled || "true";
+  document.getElementById("europeana-enabled").value = byProvider.europeana?.enabled || "false";
+  document.getElementById("europeana-api-key").value = byProvider.europeana?.api_key || "";
+  document.getElementById("openrefine-enabled").value = byProvider.openrefine?.enabled || "false";
+  document.getElementById("openrefine-service-url").value = byProvider.openrefine?.service_url || "";
   document.getElementById("local-folder-path").value = byProvider.local?.folder_path || "";
   document.getElementById("local-enabled").value = byProvider.local?.enabled || "false";
   document.getElementById("face-threshold").value = byProvider.face?.threshold || "0.52";
@@ -156,7 +171,20 @@ async function saveProviderConfig() {
   const mlxModel = document.getElementById("mlx-model").value.trim() || "mlx-community/Llama-3.2-3B-Instruct-4bit";
   const familyClientId = document.getElementById("family-client-id").value.trim();
   const familyClientSecret = document.getElementById("family-client-secret").value.trim();
+  const familyAccessToken = document.getElementById("family-access-token").value.trim();
   const naraApiKey = document.getElementById("nara-api-key").value.trim();
+  const locApiKey = document.getElementById("loc-api-key").value.trim();
+  const censusEnabled = document.getElementById("census-enabled").value;
+  const censusApiKey = document.getElementById("census-api-key").value.trim();
+  const gnisEnabled = document.getElementById("gnis-enabled").value;
+  const gnisDatasetPath = document.getElementById("gnis-dataset-path").value.trim();
+  const geonamesEnabled = document.getElementById("geonames-enabled").value;
+  const geonamesUsername = document.getElementById("geonames-username").value.trim();
+  const wikidataEnabled = document.getElementById("wikidata-enabled").value;
+  const europeanaEnabled = document.getElementById("europeana-enabled").value;
+  const europeanaApiKey = document.getElementById("europeana-api-key").value.trim();
+  const openrefineEnabled = document.getElementById("openrefine-enabled").value;
+  const openrefineServiceUrl = document.getElementById("openrefine-service-url").value.trim();
   const localFolderPath = document.getElementById("local-folder-path").value.trim();
   const localEnabled = document.getElementById("local-enabled").value;
   const faceThreshold = document.getElementById("face-threshold").value.trim() || "0.52";
@@ -179,11 +207,45 @@ async function saveProviderConfig() {
   });
   await request("/api/providers/config/familysearch", {
     method: "PUT",
-    body: JSON.stringify({ values: { client_id: familyClientId, client_secret: familyClientSecret } }),
+    body: JSON.stringify({
+      values: {
+        client_id: familyClientId,
+        client_secret: familyClientSecret,
+        access_token: familyAccessToken,
+      },
+    }),
   });
   await request("/api/providers/config/nara", {
     method: "PUT",
     body: JSON.stringify({ values: { api_key: naraApiKey } }),
+  });
+  await request("/api/providers/config/loc", {
+    method: "PUT",
+    body: JSON.stringify({ values: { api_key: locApiKey } }),
+  });
+  await request("/api/providers/config/census", {
+    method: "PUT",
+    body: JSON.stringify({ values: { enabled: censusEnabled, api_key: censusApiKey } }),
+  });
+  await request("/api/providers/config/gnis", {
+    method: "PUT",
+    body: JSON.stringify({ values: { enabled: gnisEnabled, dataset_path: gnisDatasetPath } }),
+  });
+  await request("/api/providers/config/geonames", {
+    method: "PUT",
+    body: JSON.stringify({ values: { enabled: geonamesEnabled, username: geonamesUsername } }),
+  });
+  await request("/api/providers/config/wikidata", {
+    method: "PUT",
+    body: JSON.stringify({ values: { enabled: wikidataEnabled } }),
+  });
+  await request("/api/providers/config/europeana", {
+    method: "PUT",
+    body: JSON.stringify({ values: { enabled: europeanaEnabled, api_key: europeanaApiKey } }),
+  });
+  await request("/api/providers/config/openrefine", {
+    method: "PUT",
+    body: JSON.stringify({ values: { enabled: openrefineEnabled, service_url: openrefineServiceUrl } }),
   });
   await request("/api/providers/config/local", {
     method: "PUT",
@@ -824,6 +886,52 @@ async function applyApproved() {
   }
 }
 
+async function uploadDocument() {
+  if (!state.sessionId) throw new Error("Upload GEDCOM first.");
+  const input = document.getElementById("doc-file");
+  if (!input.files || !input.files.length) throw new Error("Choose a file first.");
+
+  const form = new FormData();
+  form.append("file", input.files[0]);
+  const res = await fetch(`/api/sessions/${state.sessionId}/documents/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    throw new Error((await res.text()) || `Upload failed (${res.status})`);
+  }
+  const payload = await res.json();
+  document.getElementById("doc-output").textContent = JSON.stringify(payload, null, 2);
+}
+
+async function listDocuments() {
+  if (!state.sessionId) throw new Error("Upload GEDCOM first.");
+  const payload = await request(`/api/sessions/${state.sessionId}/documents?limit=100&offset=0`, {
+    headers: {},
+  });
+  document.getElementById("doc-output").textContent = JSON.stringify(payload, null, 2);
+}
+
+async function searchDocuments() {
+  if (!state.sessionId) throw new Error("Upload GEDCOM first.");
+  const query = document.getElementById("doc-search-query").value.trim();
+  if (!query) throw new Error("Enter search text first.");
+  const payload = await request(
+    `/api/sessions/${state.sessionId}/documents/search?q=${encodeURIComponent(query)}&limit=50`,
+    { headers: {} }
+  );
+  document.getElementById("doc-output").textContent = JSON.stringify(payload, null, 2);
+}
+
+async function reindexDocuments() {
+  if (!state.sessionId) throw new Error("Upload GEDCOM first.");
+  const payload = await request(`/api/sessions/${state.sessionId}/documents/reindex`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  document.getElementById("doc-output").textContent = JSON.stringify(payload, null, 2);
+}
+
 async function exportGedcom() {
   if (!state.sessionId) throw new Error("Upload GEDCOM first.");
   const version = document.getElementById("export-version").value;
@@ -963,6 +1071,38 @@ document.getElementById("export-btn").addEventListener("click", async () => {
     await exportGedcom();
   } catch (err) {
     setText("upload-status", `Error: ${err.message}`);
+  }
+});
+
+document.getElementById("upload-doc-btn").addEventListener("click", async () => {
+  try {
+    await uploadDocument();
+  } catch (err) {
+    document.getElementById("doc-output").textContent = `Error: ${err.message}`;
+  }
+});
+
+document.getElementById("list-docs-btn").addEventListener("click", async () => {
+  try {
+    await listDocuments();
+  } catch (err) {
+    document.getElementById("doc-output").textContent = `Error: ${err.message}`;
+  }
+});
+
+document.getElementById("search-docs-btn").addEventListener("click", async () => {
+  try {
+    await searchDocuments();
+  } catch (err) {
+    document.getElementById("doc-output").textContent = `Error: ${err.message}`;
+  }
+});
+
+document.getElementById("reindex-docs-btn").addEventListener("click", async () => {
+  try {
+    await reindexDocuments();
+  } catch (err) {
+    document.getElementById("doc-output").textContent = `Error: ${err.message}`;
   }
 });
 

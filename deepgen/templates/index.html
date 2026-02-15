@@ -50,8 +50,65 @@
           <label>FamilySearch Client Secret
             <input id="family-client-secret" type="password" />
           </label>
+          <label>FamilySearch Access Token
+            <input id="family-access-token" type="password" placeholder="Bearer token (optional)" />
+          </label>
           <label>NARA API Key
             <input id="nara-api-key" type="password" />
+          </label>
+          <label>LOC API Key
+            <input id="loc-api-key" type="password" />
+          </label>
+          <label>Enable Census Surname API
+            <select id="census-enabled">
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>Census API Key
+            <input id="census-api-key" type="password" />
+          </label>
+          <label>Enable GNIS Dataset Connector
+            <select id="gnis-enabled">
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>GNIS Dataset Path
+            <input id="gnis-dataset-path" type="text" placeholder="/Users/you/Data/GNIS/" />
+          </label>
+          <label>Enable GeoNames API
+            <select id="geonames-enabled">
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>GeoNames Username
+            <input id="geonames-username" type="text" />
+          </label>
+          <label>Enable Wikidata Search
+            <select id="wikidata-enabled">
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>Enable Europeana API
+            <select id="europeana-enabled">
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>Europeana API Key
+            <input id="europeana-api-key" type="password" />
+          </label>
+          <label>Enable OpenRefine Reconciliation
+            <select id="openrefine-enabled">
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label>OpenRefine Reconciliation URL
+            <input id="openrefine-service-url" type="text" placeholder="http://localhost:3333/reconcile" />
           </label>
           <label>Local Research Folder (mac path)
             <input id="local-folder-path" type="text" placeholder="/Users/you/Documents/GenealogyVault" />
@@ -156,6 +213,21 @@
         </label>
         <button id="export-btn">Export</button>
         <a id="download-link" href="#" download="deepgen_export.ged">Download Export</a>
+      </section>
+
+      <section class="card">
+        <h2>7. User File Uploads + Index</h2>
+        <div class="row">
+          <input id="doc-file" type="file" />
+          <button id="upload-doc-btn">Upload + Index</button>
+          <button id="list-docs-btn">List Indexed Files</button>
+          <button id="reindex-docs-btn">Reindex All</button>
+        </div>
+        <div class="row">
+          <input id="doc-search-query" type="text" placeholder="Search indexed uploads..." />
+          <button id="search-docs-btn">Search</button>
+        </div>
+        <pre id="doc-output"></pre>
       </section>
     </main>
     <script src="/static/app.js"></script>
