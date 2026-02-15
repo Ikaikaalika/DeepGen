@@ -28,6 +28,7 @@ DeepGen is a local-first genealogy research app scaffold focused on finding miss
 - Wikidata entity search connector.
 - Europeana API connector.
 - OpenRefine reconciliation connector.
+- Social lead connector (X, LinkedIn, Reddit, GitHub, optional Facebook/Instagram/Bluesky).
 - Local folder connector (filename/content hints + citations).
 
 ## Quick start
@@ -77,16 +78,19 @@ Update checks:
 6. Run `Run Research Job` to execute the staged v2 pipeline:
    - retrieval -> extraction -> contradiction checks -> proposal synthesis.
    - includes evidence from indexed user-uploaded files automatically.
-7. Review proposals in `pending_review` and approve/reject/edit manually.
-8. Run `Apply Approved Proposals` to update parent links with audit events.
-9. Optionally run `Run Face Pairing` for unlabeled image matching.
+7. Answer agent-generated research questions in `question-review` to resolve evidence gaps.
+8. Review proposals in `pending_review` and approve/reject/edit manually.
+9. Run `Apply Approved Proposals` to update parent links with audit events.
+10. Optionally run `Run Face Pairing` for unlabeled image matching.
 
 ## Research v2 API
 - `POST /api/sessions/{session_id}/research/jobs`
 - `GET /api/research/jobs/{job_id}`
 - `GET /api/research/jobs/{job_id}/findings`
 - `GET /api/research/jobs/{job_id}/proposals`
+- `GET /api/research/jobs/{job_id}/questions`
 - `POST /api/research/proposals/{proposal_id}/decision`
+- `POST /api/research/questions/{question_id}/answer`
 - `POST /api/sessions/{session_id}/research/apply-approved`
 
 ## User Document Index API
@@ -138,6 +142,7 @@ Use the UI form in section `Provider Config` to set:
 - Wikidata enabled toggle
 - Europeana API key + enabled toggle
 - OpenRefine reconciliation URL + enabled toggle
+- Social lead connector + platform toggles (X, LinkedIn, Reddit, GitHub, Facebook, Instagram, Bluesky)
 - Local folder path + enabled toggle
 - Face threshold
 - LLM backend (`openai`, `anthropic`, `mlx`, or `none`)

@@ -189,6 +189,35 @@ class ResearchProposalsResponse(BaseModel):
     proposals: list[ResearchProposalView] = Field(default_factory=list)
 
 
+class ResearchQuestionView(BaseModel):
+    question_id: int
+    job_id: str
+    session_id: str
+    person_xref: str
+    relationship: str
+    status: str
+    question: str
+    rationale: str
+    answer: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ResearchQuestionsResponse(BaseModel):
+    job_id: str
+    total: int
+    questions: list[ResearchQuestionView] = Field(default_factory=list)
+
+
+class ResearchQuestionAnswerRequest(BaseModel):
+    answer: str | None = None
+    status: Literal["answered", "skipped"] = "answered"
+
+
+class ResearchQuestionAnswerResponse(BaseModel):
+    question: ResearchQuestionView
+
+
 class ProposalDecisionRequest(BaseModel):
     action: Literal["approve", "reject", "edit"]
     candidate_name: str | None = None

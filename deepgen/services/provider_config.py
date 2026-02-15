@@ -21,6 +21,7 @@ SUPPORTED_PROVIDERS = (
     "wikidata",
     "europeana",
     "openrefine",
+    "social",
     "llm",
     "mlx",
     "ocr",
@@ -81,6 +82,16 @@ def _default_configs() -> dict[str, dict[str, str]]:
         "openrefine": {
             "enabled": "false",
             "service_url": settings.openrefine_service_url or "",
+        },
+        "social": {
+            "enabled": "false",
+            "x_enabled": "true",
+            "linkedin_enabled": "true",
+            "reddit_enabled": "true",
+            "github_enabled": "true",
+            "facebook_enabled": "false",
+            "instagram_enabled": "false",
+            "bluesky_enabled": "false",
         },
         "ocr": {
             "provider": "tesseract",

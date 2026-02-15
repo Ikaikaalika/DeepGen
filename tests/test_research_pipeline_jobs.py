@@ -8,13 +8,15 @@ pytest.importorskip("pydantic_settings")
 
 from deepgen.db import Base
 from deepgen.models import ParentProposal, Person, UploadSession
-from deepgen.schemas import ProposalDecisionRequest
+from deepgen.schemas import ProposalDecisionRequest, ResearchQuestionAnswerRequest
 from deepgen.services.research_pipeline.backend_adapters import LLMRuntime
 from deepgen.services.research_pipeline.jobs import (
+    answer_research_question,
     create_research_job,
     decide_proposal,
     list_job_findings,
     list_job_proposals,
+    list_job_questions,
     run_research_job,
 )
 from deepgen.services.source_types import SourceResult
@@ -47,6 +49,11 @@ class _StubLLM:
             '{"claims":[{"relationship":"father","candidate_name":"John Doe","confidence":0.8,'
             '"rationale":"Likely father from record","evidence_ids":[1]}]}'
         )
+
+
+class _NoClaimLLM:
+    def generate(self, prompt: str) -> str:  # noqa: ARG002
+        return '{"claims":[]}'
 
 
 @pytest.fixture
@@ -222,3 +229,51 @@ def test_list_job_proposals_pagination_and_order(db_session: Session):
     assert total == 3
     assert [item["relationship"] for item in first_page] == ["father", "mother"]
     assert [item["person_xref"] for item in second_page] == ["@I20@"]
+
+
+def test_agentic_questions_created_and_answer_reused(monkeypatch, db_session: Session):
+    _seed_session(db_session)
+
+    monkeypatch.setattr("deepgen.services.research_pipeline.jobs.list_provider_configs", lambda db: {})
+    monkeypatch.setattr("deepgen.services.research_pipeline.jobs.build_connectors", lambda cfg: [])
+    monkeypatch.setattr(
+        "deepgen.services.research_pipeline.jobs.resolve_runtime",
+        lambda cfg: LLMRuntime(backend="openai", model="stub", client=_NoClaimLLM()),
+    )
+
+    first_job = create_research_job(
+        db_session,
+        session_id="sess1",
+        people_xrefs=None,
+        max_people=10,
+        connector_overrides=None,
+        prompt_template_version="v2",
+    )
+    run_research_job(db_session, first_job.id)
+
+    questions, total = list_job_questions(db_session, first_job.id)
+    assert total > 0
+    pending = [q for q in questions if q["status"] == "pending"]
+    assert pending
+
+    question_id = pending[0]["question_id"]
+    answer_research_question(
+        db_session,
+        question_id,
+        body=ResearchQuestionAnswerRequest(status="answered", answer="Her father might be John Patrick Doe"),
+    )
+
+    second_job = create_research_job(
+        db_session,
+        session_id="sess1",
+        people_xrefs=None,
+        max_people=10,
+        connector_overrides=None,
+        prompt_template_version="v2",
+    )
+    run_research_job(db_session, second_job.id)
+
+    findings = list_job_findings(db_session, second_job.id)
+    assert findings
+    sources = [item["source"] for item in findings[0]["evidence"]]
+    assert "user_answers" in sources

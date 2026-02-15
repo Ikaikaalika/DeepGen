@@ -85,6 +85,26 @@ class ResearchJob(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ResearchQuestion(Base):
+    __tablename__ = "research_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String(64), ForeignKey("research_jobs.id"), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(64), ForeignKey("upload_sessions.id"), nullable=False)
+    person_xref: Mapped[str] = mapped_column(String(64), nullable=False)
+    relationship: Mapped[str] = mapped_column(String(32), nullable=False, default="general")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    answer: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 class EvidenceItem(Base):
     __tablename__ = "evidence_items"
 

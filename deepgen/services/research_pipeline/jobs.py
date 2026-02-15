@@ -15,8 +15,9 @@ from deepgen.models import (
     Person,
     ProposalDecision,
     ResearchJob,
+    ResearchQuestion,
 )
-from deepgen.schemas import ProposalDecisionRequest
+from deepgen.schemas import ProposalDecisionRequest, ResearchQuestionAnswerRequest
 from deepgen.services.connectors import SourceConnector, build_connectors
 from deepgen.services.document_index import search_uploaded_documents_for_person
 from deepgen.services.provider_config import list_provider_configs
@@ -130,6 +131,116 @@ def _filtered_connectors(connectors: list[SourceConnector], overrides: dict[str,
     return filtered
 
 
+def _create_question_if_missing(
+    db: Session,
+    *,
+    job: ResearchJob,
+    person_xref: str,
+    relationship: str,
+    question: str,
+    rationale: str,
+) -> None:
+    existing = db.scalars(
+        select(ResearchQuestion).where(
+            ResearchQuestion.job_id == job.id,
+            ResearchQuestion.person_xref == person_xref,
+            ResearchQuestion.relationship == relationship,
+            ResearchQuestion.question == question,
+        )
+    ).first()
+    if existing:
+        return
+
+    db.add(
+        ResearchQuestion(
+            job_id=job.id,
+            session_id=job.session_id,
+            person_xref=person_xref,
+            relationship=relationship,
+            status="pending",
+            question=question,
+            rationale=rationale,
+        )
+    )
+
+
+def _create_gap_questions_for_person(
+    db: Session,
+    *,
+    job: ResearchJob,
+    person: Person,
+    drafts: list,
+    contradiction_flags: list[str],
+) -> None:
+    for draft in drafts:
+        if draft.relationship not in {"father", "mother"}:
+            continue
+        if draft.candidate_name:
+            continue
+
+        relationship_label = "father" if draft.relationship == "father" else "mother"
+        _create_question_if_missing(
+            db,
+            job=job,
+            person_xref=person.xref,
+            relationship=draft.relationship,
+            question=(
+                f"For {person.name} ({person.xref}), do you know any likely {relationship_label} name, "
+                "nickname, or surname variant?"
+            ),
+            rationale="Model found insufficient evidence for this parent relationship.",
+        )
+        _create_question_if_missing(
+            db,
+            job=job,
+            person_xref=person.xref,
+            relationship=draft.relationship,
+            question=(
+                f"Do you have any records for {person.name} ({person.xref}) that mention their {relationship_label} "
+                "(census, obituary, church, military, or newspaper)?"
+            ),
+            rationale="Additional records may unlock parent attribution confidence.",
+        )
+        _create_question_if_missing(
+            db,
+            job=job,
+            person_xref=person.xref,
+            relationship=draft.relationship,
+            question=(
+                f"Are there living relatives, local historians, or social-media contacts you can reach "
+                f"who may know {person.name}'s {relationship_label}?"
+            ),
+            rationale="Human contact leads can provide non-indexed family knowledge.",
+        )
+
+    if contradiction_flags:
+        _create_question_if_missing(
+            db,
+            job=job,
+            person_xref=person.xref,
+            relationship="general",
+            question=(
+                f"There are conflicting parent leads for {person.name} ({person.xref}). "
+                "Which candidate is most credible and why?"
+            ),
+            rationale=f"Contradictions detected: {', '.join(contradiction_flags)}",
+        )
+
+
+def _answered_questions_for_person(db: Session, *, session_id: str, person_xref: str) -> list[ResearchQuestion]:
+    rows = db.scalars(
+        select(ResearchQuestion)
+        .where(
+            ResearchQuestion.session_id == session_id,
+            ResearchQuestion.person_xref == person_xref,
+            ResearchQuestion.status == "answered",
+        )
+        .order_by(ResearchQuestion.updated_at.desc(), ResearchQuestion.id.desc())
+        .limit(8)
+    ).all()
+    return rows
+
+
 def run_research_job(db: Session, job_id: str) -> ResearchJob:
     job = db.get(ResearchJob, job_id)
     if not job:
@@ -190,6 +301,11 @@ def run_research_job(db: Session, job_id: str) -> ResearchJob:
                 birth_year=person.birth_year,
                 limit=6,
             )
+            answered_questions = _answered_questions_for_person(
+                db,
+                session_id=job.session_id,
+                person_xref=person.xref,
+            )
             _record_stage_duration(stats, "retrieval", perf_counter() - retrieval_start)
             job.retry_count += retrieval.retries_used
             for err in retrieval.errors:
@@ -240,6 +356,27 @@ def run_research_job(db: Session, job_id: str) -> ResearchJob:
                     note=upload_item.note,
                     normalized_url=upload_item.url.strip().lower(),
                     normalized_title_hash=f"user-upload-{rank}",
+                    retrieval_rank=rank,
+                )
+                db.add(row)
+                db.flush()
+                evidence_rows.append(row)
+                rank += 1
+
+            for answered in answered_questions:
+                answer_text = (answered.answer or "").strip()
+                if not answer_text:
+                    continue
+                question_text = answered.question.strip()
+                row = EvidenceItem(
+                    job_id=job.id,
+                    person_xref=person.xref,
+                    source="user_answers",
+                    title=f"User answer ({answered.relationship})",
+                    url="",
+                    note=f"Q: {question_text} | A: {answer_text}",
+                    normalized_url="",
+                    normalized_title_hash=f"user-answer-{answered.id}",
                     retrieval_rank=rank,
                 )
                 db.add(row)
@@ -313,6 +450,18 @@ def run_research_job(db: Session, job_id: str) -> ResearchJob:
                         score_components_json=json.dumps(draft.score_components, sort_keys=True),
                     )
                 )
+
+            contradiction_flags: list[str] = []
+            contradiction_flags.extend(contradictions.global_flags)
+            for rel_flags in contradictions.by_relationship.values():
+                contradiction_flags.extend(rel_flags)
+            _create_gap_questions_for_person(
+                db,
+                job=job,
+                person=person,
+                drafts=drafts,
+                contradiction_flags=sorted(set(contradiction_flags)),
+            )
 
             if retrieval.errors or not extraction.parse_valid:
                 job.error_count += 1
@@ -485,6 +634,61 @@ def list_job_proposals(db: Session, job_id: str, *, limit: int, offset: int) -> 
         )
 
     return payload, total
+
+
+def _question_to_payload(row: ResearchQuestion) -> dict:
+    return {
+        "question_id": row.id,
+        "job_id": row.job_id,
+        "session_id": row.session_id,
+        "person_xref": row.person_xref,
+        "relationship": row.relationship,
+        "status": row.status,
+        "question": row.question,
+        "rationale": row.rationale,
+        "answer": row.answer,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def list_job_questions(db: Session, job_id: str) -> tuple[list[dict], int]:
+    job = db.get(ResearchJob, job_id)
+    if not job:
+        raise ValueError("Research job not found")
+
+    rows = db.scalars(
+        select(ResearchQuestion)
+        .where(ResearchQuestion.job_id == job_id)
+        .order_by(ResearchQuestion.status, ResearchQuestion.person_xref, ResearchQuestion.id)
+    ).all()
+    payload = [_question_to_payload(row) for row in rows]
+    return payload, len(payload)
+
+
+def answer_research_question(
+    db: Session,
+    question_id: int,
+    body: ResearchQuestionAnswerRequest,
+) -> ResearchQuestion:
+    row = db.get(ResearchQuestion, question_id)
+    if not row:
+        raise ValueError("Research question not found")
+
+    if body.status == "answered":
+        answer = (body.answer or "").strip()
+        if not answer:
+            raise ValueError("Answer is required when status is 'answered'")
+        row.answer = answer
+        row.status = "answered"
+    elif body.status == "skipped":
+        row.status = "skipped"
+    else:
+        raise ValueError(f"Unsupported status: {body.status}")
+
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 def decide_proposal(db: Session, proposal_id: int, body: ProposalDecisionRequest) -> ParentProposal:

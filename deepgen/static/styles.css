@@ -188,6 +188,12 @@ pre {
   gap: 8px;
 }
 
+#question-review {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
 .proposal-card {
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -213,6 +219,28 @@ pre {
 
 .proposal-actions button {
   padding: 7px 10px;
+}
+
+.question-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7f6f2;
+  padding: 10px;
+}
+
+.question-card p {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.question-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.question-actions input {
+  min-width: 280px;
 }
 
 @media (max-width: 700px) {

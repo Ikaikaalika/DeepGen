@@ -505,6 +505,102 @@ class OpenRefineConnector(SourceConnector):
         return results
 
 
+class SocialLeadConnector(SourceConnector):
+    name = "social_leads"
+
+    def __init__(
+        self,
+        *,
+        x_enabled: bool,
+        linkedin_enabled: bool,
+        reddit_enabled: bool,
+        github_enabled: bool,
+        facebook_enabled: bool,
+        instagram_enabled: bool,
+        bluesky_enabled: bool,
+    ):
+        self.x_enabled = x_enabled
+        self.linkedin_enabled = linkedin_enabled
+        self.reddit_enabled = reddit_enabled
+        self.github_enabled = github_enabled
+        self.facebook_enabled = facebook_enabled
+        self.instagram_enabled = instagram_enabled
+        self.bluesky_enabled = bluesky_enabled
+
+    def search_person(self, name: str, birth_year: int | None) -> list[SourceResult]:
+        query = f"{name} {birth_year}" if birth_year else name
+        encoded = query.replace(" ", "%20")
+        name_handle = "".join(ch for ch in name.lower() if ch.isalnum())[:30] or "person"
+
+        results: list[SourceResult] = []
+
+        if self.linkedin_enabled:
+            results.append(
+                SourceResult(
+                    source=self.name,
+                    title=f"LinkedIn people search lead: {name}",
+                    url=f"https://www.linkedin.com/search/results/people/?keywords={encoded}",
+                    note="Potential contact lead from public LinkedIn search. Manual verification required.",
+                )
+            )
+        if self.x_enabled:
+            results.append(
+                SourceResult(
+                    source=self.name,
+                    title=f"X/Twitter search lead: {name}",
+                    url=f"https://x.com/search?q={encoded}&src=typed_query",
+                    note="Potential contact lead from public X search results. Manual verification required.",
+                )
+            )
+        if self.reddit_enabled:
+            results.append(
+                SourceResult(
+                    source=self.name,
+                    title=f"Reddit discussion lead: {name}",
+                    url=f"https://www.reddit.com/search/?q={encoded}",
+                    note="Potential information lead from Reddit communities and threads.",
+                )
+            )
+        if self.github_enabled:
+            results.append(
+                SourceResult(
+                    source=self.name,
+                    title=f"GitHub user lead: {name}",
+                    url=f"https://github.com/search?q={encoded}&type=users",
+                    note="Potential public-profile contact lead from GitHub user search.",
+                )
+            )
+        if self.facebook_enabled:
+            results.append(
+                SourceResult(
+                    source=self.name,
+                    title=f"Facebook public search lead: {name}",
+                    url=f"https://www.facebook.com/search/top/?q={encoded}",
+                    note="Potential contact lead from Facebook public search (login may be required).",
+                )
+            )
+        if self.instagram_enabled:
+            results.append(
+                SourceResult(
+                    source=self.name,
+                    title=f"Instagram profile lead: {name}",
+                    url=f"https://www.instagram.com/{name_handle}/",
+                    note="Potential profile lead from Instagram handle heuristic. Manual verification required.",
+                )
+            )
+        if self.bluesky_enabled:
+            results.append(
+                SourceResult(
+                    source=self.name,
+                    title=f"Bluesky search lead: {name}",
+                    url=f"https://bsky.app/search?q={encoded}",
+                    note="Potential contact lead from public Bluesky search results.",
+                )
+            )
+
+        return results[:8]
+
+
 class LocalFolderConnector(SourceConnector):
     name = "local_folder"
 
@@ -548,6 +644,7 @@ def build_connectors(configs: dict[str, dict[str, str]]) -> list[SourceConnector
     wikidata = configs.get("wikidata", {})
     europeana = configs.get("europeana", {})
     openrefine = configs.get("openrefine", {})
+    social = configs.get("social", {})
     local = configs.get("local", {})
 
     family_access_token = family.get("access_token", "").strip()
@@ -584,6 +681,19 @@ def build_connectors(configs: dict[str, dict[str, str]]) -> list[SourceConnector
 
     if _enabled(openrefine) and openrefine.get("service_url", "").strip():
         connectors.append(OpenRefineConnector(service_url=openrefine["service_url"].strip()))
+
+    if _enabled(social):
+        connectors.append(
+            SocialLeadConnector(
+                x_enabled=str(social.get("x_enabled", "true")).lower() == "true",
+                linkedin_enabled=str(social.get("linkedin_enabled", "true")).lower() == "true",
+                reddit_enabled=str(social.get("reddit_enabled", "true")).lower() == "true",
+                github_enabled=str(social.get("github_enabled", "true")).lower() == "true",
+                facebook_enabled=str(social.get("facebook_enabled", "false")).lower() == "true",
+                instagram_enabled=str(social.get("instagram_enabled", "false")).lower() == "true",
+                bluesky_enabled=str(social.get("bluesky_enabled", "false")).lower() == "true",
+            )
+        )
 
     local_folder = local.get("folder_path", "").strip()
     if _enabled(local) and local_folder:

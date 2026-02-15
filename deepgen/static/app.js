@@ -2,6 +2,7 @@ const state = {
   sessionId: null,
   researchJobId: null,
   researchProposals: [],
+  researchQuestions: [],
   livingPeople: [],
   people: [],
   peopleByXref: {},
@@ -122,6 +123,14 @@ async function loadProviderConfig() {
   document.getElementById("europeana-api-key").value = byProvider.europeana?.api_key || "";
   document.getElementById("openrefine-enabled").value = byProvider.openrefine?.enabled || "false";
   document.getElementById("openrefine-service-url").value = byProvider.openrefine?.service_url || "";
+  document.getElementById("social-enabled").value = byProvider.social?.enabled || "false";
+  document.getElementById("social-x-enabled").value = byProvider.social?.x_enabled || "true";
+  document.getElementById("social-linkedin-enabled").value = byProvider.social?.linkedin_enabled || "true";
+  document.getElementById("social-reddit-enabled").value = byProvider.social?.reddit_enabled || "true";
+  document.getElementById("social-github-enabled").value = byProvider.social?.github_enabled || "true";
+  document.getElementById("social-facebook-enabled").value = byProvider.social?.facebook_enabled || "false";
+  document.getElementById("social-instagram-enabled").value = byProvider.social?.instagram_enabled || "false";
+  document.getElementById("social-bluesky-enabled").value = byProvider.social?.bluesky_enabled || "false";
   document.getElementById("local-folder-path").value = byProvider.local?.folder_path || "";
   document.getElementById("local-enabled").value = byProvider.local?.enabled || "false";
   document.getElementById("face-threshold").value = byProvider.face?.threshold || "0.52";
@@ -185,6 +194,14 @@ async function saveProviderConfig() {
   const europeanaApiKey = document.getElementById("europeana-api-key").value.trim();
   const openrefineEnabled = document.getElementById("openrefine-enabled").value;
   const openrefineServiceUrl = document.getElementById("openrefine-service-url").value.trim();
+  const socialEnabled = document.getElementById("social-enabled").value;
+  const socialXEnabled = document.getElementById("social-x-enabled").value;
+  const socialLinkedinEnabled = document.getElementById("social-linkedin-enabled").value;
+  const socialRedditEnabled = document.getElementById("social-reddit-enabled").value;
+  const socialGithubEnabled = document.getElementById("social-github-enabled").value;
+  const socialFacebookEnabled = document.getElementById("social-facebook-enabled").value;
+  const socialInstagramEnabled = document.getElementById("social-instagram-enabled").value;
+  const socialBlueskyEnabled = document.getElementById("social-bluesky-enabled").value;
   const localFolderPath = document.getElementById("local-folder-path").value.trim();
   const localEnabled = document.getElementById("local-enabled").value;
   const faceThreshold = document.getElementById("face-threshold").value.trim() || "0.52";
@@ -247,6 +264,21 @@ async function saveProviderConfig() {
     method: "PUT",
     body: JSON.stringify({ values: { enabled: openrefineEnabled, service_url: openrefineServiceUrl } }),
   });
+  await request("/api/providers/config/social", {
+    method: "PUT",
+    body: JSON.stringify({
+      values: {
+        enabled: socialEnabled,
+        x_enabled: socialXEnabled,
+        linkedin_enabled: socialLinkedinEnabled,
+        reddit_enabled: socialRedditEnabled,
+        github_enabled: socialGithubEnabled,
+        facebook_enabled: socialFacebookEnabled,
+        instagram_enabled: socialInstagramEnabled,
+        bluesky_enabled: socialBlueskyEnabled,
+      },
+    }),
+  });
   await request("/api/providers/config/local", {
     method: "PUT",
     body: JSON.stringify({ values: { folder_path: localFolderPath, enabled: localEnabled } }),
@@ -270,8 +302,10 @@ async function uploadGedcom() {
   state.sessionId = data.session_id;
   state.researchJobId = null;
   state.researchProposals = [];
+  state.researchQuestions = [];
   document.getElementById("research-job-status").textContent = "";
   document.getElementById("proposal-review").innerHTML = "";
+  document.getElementById("question-review").innerHTML = "";
   setText(
     "upload-status",
     `Session ${data.session_id} | Version ${data.gedcom_version} | People ${data.person_count} | Living ${data.living_count}`
@@ -776,6 +810,10 @@ async function loadJobProposals(jobId) {
   return request(`/api/research/jobs/${jobId}/proposals?limit=250&offset=0`, { headers: {} });
 }
 
+async function loadJobQuestions(jobId) {
+  return request(`/api/research/jobs/${jobId}/questions`, { headers: {} });
+}
+
 function renderProposalReview() {
   const root = document.getElementById("proposal-review");
   root.innerHTML = "";
@@ -833,6 +871,80 @@ function renderProposalReview() {
   }
 }
 
+function renderQuestionReview() {
+  const root = document.getElementById("question-review");
+  root.innerHTML = "";
+
+  if (!state.researchQuestions.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "No open research questions.";
+    root.appendChild(empty);
+    return;
+  }
+
+  for (const item of state.researchQuestions) {
+    const card = document.createElement("article");
+    card.className = "question-card";
+    const personName = state.peopleByXref[item.person_xref]?.name || item.person_xref;
+    card.innerHTML = `
+      <p><strong>${personName} (${item.person_xref}) • ${item.relationship}</strong></p>
+      <p>status=${item.status}</p>
+      <p>question=${item.question}</p>
+      <p>rationale=${item.rationale}</p>
+    `;
+
+    if (item.status === "pending") {
+      const actions = document.createElement("div");
+      actions.className = "question-actions";
+      actions.innerHTML = `
+        <input type="text" placeholder="Your answer..." />
+        <button data-action="answer">Submit Answer</button>
+        <button data-action="skip">Skip</button>
+      `;
+      const input = actions.querySelector("input");
+      const answerBtn = actions.querySelector('button[data-action="answer"]');
+      const skipBtn = actions.querySelector('button[data-action="skip"]');
+
+      answerBtn.addEventListener("click", async () => {
+        try {
+          const answer = (input.value || "").trim();
+          if (!answer) throw new Error("Enter an answer first.");
+          await answerQuestion(item.question_id, { status: "answered", answer });
+        } catch (err) {
+          document.getElementById("research-output").textContent = `Error: ${err.message}`;
+        }
+      });
+
+      skipBtn.addEventListener("click", async () => {
+        try {
+          await answerQuestion(item.question_id, { status: "skipped" });
+        } catch (err) {
+          document.getElementById("research-output").textContent = `Error: ${err.message}`;
+        }
+      });
+
+      card.appendChild(actions);
+    } else if (item.answer) {
+      const answer = document.createElement("p");
+      answer.textContent = `answer=${item.answer}`;
+      card.appendChild(answer);
+    }
+
+    root.appendChild(card);
+  }
+}
+
+async function answerQuestion(questionId, payload) {
+  await request(`/api/research/questions/${questionId}/answer`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!state.researchJobId) return;
+  const questionsRes = await loadJobQuestions(state.researchJobId);
+  state.researchQuestions = questionsRes.questions || [];
+  renderQuestionReview();
+}
+
 async function decideProposal(proposalId, payload) {
   await request(`/api/research/proposals/${proposalId}/decision`, {
     method: "POST",
@@ -842,10 +954,15 @@ async function decideProposal(proposalId, payload) {
   const proposalRes = await loadJobProposals(state.researchJobId);
   state.researchProposals = proposalRes.proposals || [];
   renderProposalReview();
+  const questionsRes = await loadJobQuestions(state.researchJobId);
+  state.researchQuestions = questionsRes.questions || [];
+  renderQuestionReview();
 }
 
 async function runResearch() {
   if (!state.sessionId) throw new Error("Upload GEDCOM first.");
+  state.researchQuestions = [];
+  document.getElementById("question-review").innerHTML = "";
   const payload = { max_people: 15 };
   const created = await request(`/api/sessions/${state.sessionId}/research/jobs`, {
     method: "POST",
@@ -883,6 +1000,9 @@ async function applyApproved() {
     const proposalRes = await loadJobProposals(state.researchJobId);
     state.researchProposals = proposalRes.proposals || [];
     renderProposalReview();
+    const questionsRes = await loadJobQuestions(state.researchJobId);
+    state.researchQuestions = questionsRes.questions || [];
+    renderQuestionReview();
   }
 }
 

@@ -12,6 +12,7 @@ def test_build_connectors_includes_extended_sources_when_enabled():
         "wikidata": {"enabled": "true"},
         "europeana": {"enabled": "true", "api_key": "euro-key"},
         "openrefine": {"enabled": "true", "service_url": "http://localhost:3333/reconcile"},
+        "social": {"enabled": "true"},
         "local": {"enabled": "true", "folder_path": "/tmp"},
     }
 
@@ -26,6 +27,7 @@ def test_build_connectors_includes_extended_sources_when_enabled():
     assert "wikidata" in names
     assert "europeana" in names
     assert "openrefine" in names
+    assert "social_leads" in names
     assert "local_folder" in names
 
 
@@ -40,6 +42,7 @@ def test_build_connectors_respects_disabled_flags():
         "wikidata": {"enabled": "false"},
         "europeana": {"enabled": "false", "api_key": ""},
         "openrefine": {"enabled": "false", "service_url": ""},
+        "social": {"enabled": "false"},
         "local": {"enabled": "false", "folder_path": ""},
     }
 

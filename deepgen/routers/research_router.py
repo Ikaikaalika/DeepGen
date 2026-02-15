@@ -23,6 +23,10 @@ from deepgen.schemas import (
     ResearchJobCreateRequest,
     ResearchJobCreateResponse,
     ResearchJobStatusResponse,
+    ResearchQuestionAnswerRequest,
+    ResearchQuestionAnswerResponse,
+    ResearchQuestionsResponse,
+    ResearchQuestionView,
     ResearchProposalView,
     ResearchProposalsResponse,
 )
@@ -31,11 +35,13 @@ from deepgen.services.local_files import LocalFolderError, index_local_folder
 from deepgen.services.provider_config import list_provider_configs
 from deepgen.services.research_pipeline.apply import apply_approved_proposals
 from deepgen.services.research_pipeline.jobs import (
+    answer_research_question,
     create_research_job,
     decide_proposal,
     job_status_payload,
     list_job_findings,
     list_job_proposals,
+    list_job_questions,
     run_research_job,
 )
 
@@ -165,6 +171,25 @@ def get_research_job_proposals(
     )
 
 
+@jobs_router.get("/jobs/{job_id}/questions", response_model=ResearchQuestionsResponse)
+def get_research_job_questions(
+    job_id: str,
+    db: Session = Depends(get_db),
+) -> ResearchQuestionsResponse:
+    _assert_v2_enabled()
+
+    try:
+        questions, total = list_job_questions(db, job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return ResearchQuestionsResponse(
+        job_id=job_id,
+        total=total,
+        questions=[ResearchQuestionView(**item) for item in questions],
+    )
+
+
 @jobs_router.post("/proposals/{proposal_id}/decision", response_model=ProposalDecisionResponse)
 def decide_research_proposal(
     proposal_id: int,
@@ -179,6 +204,36 @@ def decide_research_proposal(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return ProposalDecisionResponse(proposal=_proposal_json_to_view(proposal))
+
+
+@jobs_router.post("/questions/{question_id}/answer", response_model=ResearchQuestionAnswerResponse)
+def answer_job_question(
+    question_id: int,
+    body: ResearchQuestionAnswerRequest,
+    db: Session = Depends(get_db),
+) -> ResearchQuestionAnswerResponse:
+    _assert_v2_enabled()
+
+    try:
+        row = answer_research_question(db, question_id, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ResearchQuestionAnswerResponse(
+        question=ResearchQuestionView(
+            question_id=row.id,
+            job_id=row.job_id,
+            session_id=row.session_id,
+            person_xref=row.person_xref,
+            relationship=row.relationship,
+            status=row.status,
+            question=row.question,
+            rationale=row.rationale,
+            answer=row.answer,
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
+    )
 
 
 @sessions_router.post("/{session_id}/research/apply-approved", response_model=ApplyApprovedResponse)
